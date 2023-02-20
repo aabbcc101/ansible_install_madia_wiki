@@ -1,0 +1,119 @@
+- name: Install_MediaWiki
+  hosts: 
+    - test
+    - my_warehouse
+  become: yes
+
+  vars: 
+    packages:
+      - php8.1
+      - mariadb-server-10.6
+      - apache2
+      - php8.1-mysql
+      - libapache2-mod-php8.1
+      - php8.1-xml
+      - php8.1-mbstring
+    mysql_root_password: user
+
+  tasks:
+
+  - name: Install_services_for_mediawiki
+    apt:
+      pkg: "{{packages}}"
+#      state: present
+
+  - name: GET Mediawiki package
+    get_url:
+      url: 'https://releases.wikimedia.org/mediawiki/1.39/mediawiki-1.39.1.tar.gz'
+      dest: /tmp/
+      mode: 0400
+
+  - name: Unarchive
+    unarchive:
+      src: /tmp/mediawiki-1.39.1.tar.gz
+      dest: /tmp/
+      remote_src: yes
+
+  - name: mkdir
+    file:
+      path: /var/lib/mediawiki
+      state: directory
+
+  - name: Move files
+    copy: 
+      remote_src: True 
+      src: /tmp/mediawiki-1.39.1 
+      dest: /var/lib/mediawiki
+
+  - name: Remove the downloaded file 
+    file:
+      path:  "{{item}}"
+      state: absent
+    with_items:
+    - /tmp/mediawiki-1.39.1.tar.gz
+    - /tmp/mediawiki-1.39.1
+
+
+  - name: start up the mysql service  
+    shell: "service mysql start"
+
+  - name: ensure mysql is enabled to run on start 
+    service:
+      name: mysql
+      state: started
+      enabled: true
+
+  - name: install pip3
+    apt:
+      name: python3-pip 
+      state: present 
+
+  - name: Make sure pymysql is present
+    pip:
+      name: pymysql
+      state: present
+
+  - name: Creating_a_new_database
+    mysql_db: 
+      name: my_wiki
+      state: present
+      login_unix_socket: /var/run/mysqld/mysqld.sock #for ubuntu
+
+  - name: Creating_user
+    mysql_user:
+      state: present 
+      name: wiki_user
+      password: wiki_password
+      login_unix_socket: /var/run/mysqld/mysqld.sock #for ubuntu
+      priv: 
+        'my_wiki.*': 'ALL,GRANT' 
+
+  - name: Configure PHP
+    lineinfile:
+      dest: /etc/php/8.1/apache2/php.ini
+      state: present
+      regexp: "{{item.name}}"
+      line: "{{item.line}}"
+    with_items:
+    - {name: '^memory_limit', line: 'memory_limit = 128M'}
+    - {name: '^upload_max_filesize', line: 'upload_max_filesize = 20M'}
+
+# If this gives a 404 error then working a symbolic link should solve the issue.
+  - name: Create a symbolic link
+    file:
+      src: /var/lib/mediawiki 
+      dest: /var/www/html/mediawiki
+      state: link
+
+# MediaWiki 1.36 internal error Installing some PHP extensions is required.
+  - name: Install php-intl
+    apt:
+      name: php-intl
+      state: present
+
+  - name: Restart apache2
+    service:
+      name: apache2
+      state: restarted
+
+
